@@ -128,25 +128,17 @@ impl Cli {
     }
 
     fn print_report_entry(path: &Path) -> Result<(), Error> {
-        let content = fs::read_to_string(path)?;
-        let document: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
-            Error::DriftParse {
-                source_path: path.to_path_buf(),
-                reason: error.to_string(),
-            }
-        })?;
+        let journal = hexis_cli::drift::DriftJournal::from_path_or_empty(path)?;
         let file_id = path
             .file_stem()
             .and_then(|stem| stem.to_str())
             .unwrap_or("<unknown>");
-        println!("=== {file_id} ===");
-        if let Some(applied_at) = document.pointer("/applied_at").and_then(|v| v.as_str()) {
-            println!("applied_at: {applied_at}");
-        }
-        if let Some(drift) = document.pointer("/drift") {
-            let rendered = serde_json::to_string_pretty(drift)
+        println!("=== {file_id} === ({} entries)", journal.entries().len());
+        for entry in journal.entries() {
+            println!("--- applied_at: {} ---", entry.applied_at());
+            let rendered = serde_json::to_string_pretty(entry.drift().as_value())
                 .expect("serde_json::Value always serializes");
-            println!("drift:\n{rendered}");
+            println!("{rendered}");
         }
         println!();
         Ok(())

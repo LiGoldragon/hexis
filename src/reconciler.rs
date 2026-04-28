@@ -14,16 +14,14 @@
 //! once the supervised, multi-target, watcher-driven flow lands in v2.
 
 use std::fs::{self, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use serde_json::{Map, Value};
-use tempfile::NamedTempFile;
 
 use crate::declared::Declared;
-use crate::drift::DriftPatch;
+use crate::drift::{DriftEntry, DriftJournal, DriftPatch};
 use crate::error::Error;
 use crate::live::Live;
 use crate::plan::{Action, Plan};
@@ -155,10 +153,21 @@ impl Reconciler {
             let drift_path = arguments
                 .drift_dir
                 .join(format!("{}.json", arguments.file_id));
-            Self::write_drift(&drift_path, &drift, &now)?;
+            Self::append_drift(&drift_path, drift, &now)?;
         }
 
         Ok(())
+    }
+
+    /// Append a drift entry to the per-target journal at `path`, rotating
+    /// older entries off when the cap (`DriftJournal::MAX_ENTRIES`) is
+    /// exceeded. Reads the existing journal, mutates, atomically writes
+    /// the result back. Migrates legacy single-entry drift files
+    /// transparently.
+    fn append_drift(path: &Path, drift: DriftPatch, applied_at: &str) -> Result<(), Error> {
+        let mut journal = DriftJournal::from_path_or_empty(path)?;
+        journal.append(DriftEntry::new(applied_at.to_string(), drift));
+        journal.write_atomic(path)
     }
 
     /// Acquire an advisory exclusive POSIX flock on the per-target
@@ -189,39 +198,6 @@ impl Reconciler {
         Ok(lock_file)
     }
 
-    /// Write the drift report atomically. v0.1 stores latest-only —
-    /// the journal/rotation pattern lands in v2 once the proposer
-    /// actor consumes drift across runs.
-    fn write_drift(path: &Path, drift: &DriftPatch, applied_at: &str) -> Result<(), Error> {
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent).map_err(|error| Error::DriftWrite {
-            destination_path: path.to_path_buf(),
-            reason: format!("create parent dir: {error}"),
-        })?;
-        let mut tempfile = NamedTempFile::new_in(parent).map_err(|error| Error::DriftWrite {
-            destination_path: path.to_path_buf(),
-            reason: format!("create tempfile: {error}"),
-        })?;
-        let mut entry = Map::new();
-        entry.insert("applied_at".to_string(), Value::String(applied_at.to_string()));
-        entry.insert("drift".to_string(), drift.as_value().clone());
-        let document = Value::Object(entry);
-        serde_json::to_writer_pretty(&mut tempfile, &document).map_err(|error| {
-            Error::DriftWrite {
-                destination_path: path.to_path_buf(),
-                reason: format!("serialize: {error}"),
-            }
-        })?;
-        writeln!(tempfile).map_err(|error| Error::DriftWrite {
-            destination_path: path.to_path_buf(),
-            reason: format!("write trailing newline: {error}"),
-        })?;
-        tempfile.persist(path).map_err(|error| Error::DriftWrite {
-            destination_path: path.to_path_buf(),
-            reason: format!("rename: {error}"),
-        })?;
-        Ok(())
-    }
 }
 
 #[ractor::async_trait]

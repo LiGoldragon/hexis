@@ -178,15 +178,20 @@ fn second_apply_with_drift_emits_drift_report() {
         "drift report exists after second apply"
     );
     let drift_text = fs::read_to_string(fixture.drift_path()).expect("read drift");
-    let drift: serde_json::Value = serde_json::from_str(&drift_text).expect("parse drift");
+    let journal: serde_json::Value = serde_json::from_str(&drift_text).expect("parse drift journal");
+    assert_eq!(
+        journal.pointer("/schema"),
+        Some(&json!(1)),
+        "drift journal carries schema version",
+    );
     assert!(
-        drift.pointer("/applied_at").is_some(),
-        "drift report has applied_at"
+        journal.pointer("/entries/0/applied_at").is_some(),
+        "first entry has applied_at",
     );
     assert_eq!(
-        drift.pointer("/drift/editor/wordWrap"),
+        journal.pointer("/entries/0/drift/editor/wordWrap"),
         Some(&json!("on")),
-        "drift records the user's added key"
+        "drift records the user's added key",
     );
 }
 
