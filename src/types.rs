@@ -103,6 +103,18 @@ impl JsonPointer {
             || (descendant_str.starts_with(root_str)
                 && descendant_str.as_bytes().get(root_str.len()) == Some(&b'/'))
     }
+
+    /// Construct a child pointer by appending a single object key as a
+    /// segment. Per RFC 6901, the segment is escaped: `~` → `~0`,
+    /// `/` → `~1`. Order matters — escape `~` first so the second pass
+    /// can't double-escape it.
+    pub fn append(&self, segment: &str) -> Self {
+        let escaped = segment.replace('~', "~0").replace('/', "~1");
+        let mut text = self.0.clone();
+        text.push('/');
+        text.push_str(&escaped);
+        Self(text)
+    }
 }
 
 impl FromStr for JsonPointer {

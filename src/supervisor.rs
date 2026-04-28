@@ -50,13 +50,13 @@ impl Actor for Supervisor {
         .await?;
 
         let mut reconcilers = HashMap::new();
-        for args in arguments.reconciler_targets {
-            let file_id = args.file_id.clone();
+        for target_arguments in arguments.reconciler_targets {
+            let file_id = target_arguments.file_id.clone();
             let actor_name = format!("reconciler-{file_id}");
             let (reconciler_ref, _handle) = Actor::spawn_linked(
                 Some(actor_name),
                 reconciler::Reconciler,
-                args,
+                target_arguments,
                 myself.get_cell(),
             )
             .await?;
