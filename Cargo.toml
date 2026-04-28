@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+json-patch = "4"
 ractor = { version = "0.15", features = ["async-trait"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tempfile = "3"
