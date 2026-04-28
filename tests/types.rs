@@ -123,3 +123,67 @@ fn unrelated_pointer_is_not_descendant() {
     assert!(!a.is_descendant_of(&b));
     assert!(!b.is_descendant_of(&a));
 }
+
+#[test]
+fn append_adds_segment_with_leading_slash() {
+    let pointer = JsonPointer::root().append("foo").append("bar");
+    assert_eq!(pointer.as_str(), "/foo/bar");
+}
+
+#[test]
+fn append_escapes_tilde_and_slash() {
+    // RFC 6901: '~' → '~0', '/' → '~1', and '~' must escape first
+    // so the second pass cannot double-escape.
+    let pointer = JsonPointer::root().append("a/b~c");
+    assert_eq!(pointer.as_str(), "/a~1b~0c");
+}
+
+#[test]
+fn set_in_at_root_replaces_value() {
+    let mut document = serde_json::json!({ "old": true });
+    JsonPointer::root()
+        .set_in(&mut document, serde_json::json!({ "new": true }))
+        .expect("set");
+    assert_eq!(document, serde_json::json!({ "new": true }));
+}
+
+#[test]
+fn set_in_creates_intermediate_objects() {
+    let mut document = serde_json::json!({});
+    let pointer = JsonPointer::from_str("/editor/tabSize").unwrap();
+    pointer
+        .set_in(&mut document, serde_json::json!(4))
+        .expect("set");
+    assert_eq!(document, serde_json::json!({ "editor": { "tabSize": 4 } }));
+}
+
+#[test]
+fn set_in_overwrites_existing_leaf() {
+    let mut document = serde_json::json!({ "editor": { "tabSize": 2 } });
+    let pointer = JsonPointer::from_str("/editor/tabSize").unwrap();
+    pointer
+        .set_in(&mut document, serde_json::json!(4))
+        .expect("set");
+    assert_eq!(document, serde_json::json!({ "editor": { "tabSize": 4 } }));
+}
+
+#[test]
+fn set_in_errors_when_intermediate_is_non_object() {
+    let mut document = serde_json::json!({ "editor": "string-not-object" });
+    let pointer = JsonPointer::from_str("/editor/tabSize").unwrap();
+    let result = pointer.set_in(&mut document, serde_json::json!(4));
+    assert!(matches!(result, Err(hexis_cli::Error::ApplyAtPointer { .. })));
+}
+
+#[test]
+fn set_in_round_trips_through_escaped_segments() {
+    let mut document = serde_json::json!({});
+    let pointer = JsonPointer::root().append("a/b").append("c~d");
+    pointer
+        .set_in(&mut document, serde_json::json!("leaf"))
+        .expect("set");
+    assert_eq!(
+        document,
+        serde_json::json!({ "a/b": { "c~d": "leaf" } })
+    );
+}

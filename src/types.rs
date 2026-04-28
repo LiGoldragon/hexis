@@ -115,6 +115,48 @@ impl JsonPointer {
         text.push_str(&escaped);
         Self(text)
     }
+
+    /// Set the value at the location named by this pointer in `target`,
+    /// creating any missing intermediate objects along the way.
+    ///
+    /// Returns `Error::ApplyAtPointer` if an intermediate location is
+    /// already a non-object value (we won't silently overwrite, e.g.,
+    /// an array or scalar with a freshly-conjured object).
+    pub fn set_in(&self, target: &mut serde_json::Value, new_value: serde_json::Value) -> Result<(), crate::error::Error> {
+        if self.is_root() {
+            *target = new_value;
+            return Ok(());
+        }
+        let trimmed = self.0.strip_prefix('/').expect("non-root must start with '/'");
+        let segments: Vec<String> = trimmed.split('/').map(Self::unescape_segment).collect();
+        let (last, intermediates) = segments
+            .split_last()
+            .expect("non-root pointer has at least one segment");
+
+        let mut current = target;
+        for segment in intermediates {
+            let object = current.as_object_mut().ok_or_else(|| crate::error::Error::ApplyAtPointer {
+                pointer: self.clone(),
+                reason: format!("intermediate at segment {segment:?} is not an object"),
+            })?;
+            current = object
+                .entry(segment.clone())
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        }
+        let object = current.as_object_mut().ok_or_else(|| crate::error::Error::ApplyAtPointer {
+            pointer: self.clone(),
+            reason: format!("parent at segment {last:?} is not an object"),
+        })?;
+        object.insert(last.clone(), new_value);
+        Ok(())
+    }
+
+    /// Reverse the RFC 6901 segment escape. Order matters: `~1` → `/`
+    /// must run **before** `~0` → `~`, otherwise `~01` (literal `~1`)
+    /// would round-trip incorrectly.
+    fn unescape_segment(segment: &str) -> String {
+        segment.replace("~1", "/").replace("~0", "~")
+    }
 }
 
 impl FromStr for JsonPointer {

@@ -1,8 +1,17 @@
+//! Hexis CLI entry point.
+//!
+//! v0.1 invokes [`Reconciler::apply`] directly for the single-shot
+//! `hexis apply` command — no actor harness needed for one-target,
+//! sync-IO work that completes in milliseconds. The supervisor /
+//! reconciler / proposer actor topology exists for the v2
+//! multi-target / watcher-driven flow; v0.1 exercises it through the
+//! smoke test in `tests/scaffold.rs`.
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use hexis_cli::{Error, FileId, reconciler, supervisor};
+use hexis_cli::{Error, FileId, reconciler};
 
 #[derive(Parser)]
 #[command(
@@ -25,7 +34,7 @@ enum Command {
         /// Path to the declared overlay JSON.
         #[arg(long)]
         declared: PathBuf,
-        /// Print the drift patch and proposed new live without writing.
+        /// Run the four-step apply but skip the writes.
         #[arg(long)]
         dry_run: bool,
     },
@@ -48,42 +57,22 @@ enum Command {
 }
 
 impl Cli {
-    async fn run(self) -> Result<(), Error> {
+    fn run(self) -> Result<(), Error> {
         match self.command {
-            Command::Apply { file, declared, dry_run: _ } => {
-                // Spin up the actor topology so the wiring is exercised
-                // even in v0.1, then surface NotYetImplemented because
-                // the four-step chain isn't wired yet.
-                let file_id = FileId::from_path(&file);
-                let snapshot_dir = std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| PathBuf::from("/tmp"))
-                    .join(".local/state/hexis/snapshot");
-                let target = reconciler::Arguments {
-                    file_id: file_id.clone(),
+            Command::Apply {
+                file,
+                declared,
+                dry_run,
+            } => {
+                let arguments = reconciler::Arguments {
+                    file_id: FileId::from_path(&file),
                     declared_path: declared,
                     live_path: file,
-                    snapshot_dir,
+                    snapshot_dir: state_dir().join("snapshot"),
+                    drift_dir: state_dir().join("drift"),
+                    dry_run,
                 };
-                let (sup, handle) = supervisor::Supervisor::start(supervisor::Arguments {
-                    reconciler_targets: vec![target],
-                })
-                .await?;
-                ractor::cast!(sup, supervisor::Message::Apply { file_id }).map_err(|error| {
-                    Error::ActorCall {
-                        label: "supervisor.apply",
-                        reason: error.to_string(),
-                    }
-                })?;
-                ractor::cast!(sup, supervisor::Message::Shutdown).map_err(|error| {
-                    Error::ActorCall {
-                        label: "supervisor.shutdown",
-                        reason: error.to_string(),
-                    }
-                })?;
-                drop(sup);
-                let _ = handle.await;
-                Err(Error::NotYetImplemented("apply"))
+                reconciler::Reconciler::apply(&arguments)
             }
             Command::Diff { .. } => Err(Error::NotYetImplemented("diff")),
             Command::Snapshot { .. } => Err(Error::NotYetImplemented("snapshot")),
@@ -93,10 +82,18 @@ impl Cli {
     }
 }
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> ExitCode {
+/// `~/.local/state/hexis` for normal users; `/tmp/hexis-state` as a
+/// last-resort fallback when `HOME` is unset.
+fn state_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".local/state/hexis"))
+        .unwrap_or_else(|| PathBuf::from("/tmp/hexis-state"))
+}
+
+fn main() -> ExitCode {
     let cli = Cli::parse();
-    match cli.run().await {
+    match cli.run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("hexis: {error}");

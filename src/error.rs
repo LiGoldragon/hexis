@@ -6,6 +6,8 @@
 use std::path::PathBuf;
 use thiserror::Error;
 
+use crate::types::JsonPointer;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("{0} is not yet implemented (v0.1 is scaffold-only)")]
@@ -53,6 +55,18 @@ pub enum Error {
     #[error("snapshot write failed at {destination_path:?}: {reason}")]
     SnapshotWrite {
         destination_path: PathBuf,
+        reason: String,
+    },
+
+    #[error("drift write failed at {destination_path:?}: {reason}")]
+    DriftWrite {
+        destination_path: PathBuf,
+        reason: String,
+    },
+
+    #[error("cannot apply at pointer {pointer}: {reason}")]
+    ApplyAtPointer {
+        pointer: JsonPointer,
         reason: String,
     },
 }
