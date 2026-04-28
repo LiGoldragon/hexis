@@ -64,6 +64,12 @@ pub enum Error {
         reason: String,
     },
 
+    #[error("drift parse failed at {source_path:?}: {reason}")]
+    DriftParse {
+        source_path: PathBuf,
+        reason: String,
+    },
+
     #[error("cannot apply at pointer {pointer}: {reason}")]
     ApplyAtPointer {
         pointer: JsonPointer,

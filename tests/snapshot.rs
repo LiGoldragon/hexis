@@ -4,6 +4,7 @@
 use std::str::FromStr;
 
 use hexis_cli::Error;
+use hexis_cli::live::Live;
 use hexis_cli::snapshot::{Marker, Snapshot};
 use hexis_cli::types::JsonPointer;
 use tempfile::tempdir;
@@ -125,4 +126,36 @@ fn clear_subtree_at_root_drops_everything() {
     );
     snapshot.clear_subtree(&JsonPointer::root());
     assert!(snapshot.marker(&pointer).is_none());
+}
+
+#[test]
+fn drift_against_first_run_snapshot_is_empty() {
+    // Empty snapshot has Null image — there's no prior baseline to
+    // diff against; "drift" is undefined.
+    let snapshot = Snapshot::empty(std::path::PathBuf::from("<empty>"));
+    let live = Live::from_text_for_test(r#"{ "editor": { "tabSize": 2 } }"#).unwrap();
+    let drift = snapshot.drift_against(&live);
+    assert!(drift.is_empty());
+}
+
+#[test]
+fn drift_against_unchanged_live_is_empty() {
+    let mut snapshot = Snapshot::empty(std::path::PathBuf::from("<snap>"));
+    snapshot.set_image(serde_json::json!({ "editor": { "tabSize": 4 } }));
+    let live = Live::from_text_for_test(r#"{ "editor": { "tabSize": 4 } }"#).unwrap();
+    let drift = snapshot.drift_against(&live);
+    assert!(drift.is_empty());
+}
+
+#[test]
+fn drift_against_user_changes_records_them() {
+    let mut snapshot = Snapshot::empty(std::path::PathBuf::from("<snap>"));
+    snapshot.set_image(serde_json::json!({ "editor": { "tabSize": 4 } }));
+    let live =
+        Live::from_text_for_test(r#"{ "editor": { "tabSize": 2, "wordWrap": "on" } }"#).unwrap();
+    let drift = snapshot.drift_against(&live);
+    assert_eq!(
+        drift.as_value(),
+        &serde_json::json!({ "editor": { "tabSize": 2, "wordWrap": "on" } }),
+    );
 }

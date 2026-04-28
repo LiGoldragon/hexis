@@ -199,6 +199,17 @@ impl Snapshot {
         &self.image
     }
 
+    /// Compute the user drift between this snapshot's image and a live
+    /// document. Returns an empty patch when no prior apply has run
+    /// (image is `Null` — first-run state); the architecture avoids
+    /// reporting "everything in live" as drift in that case.
+    pub fn drift_against(&self, live: &crate::live::Live) -> crate::drift::DriftPatch {
+        if self.image.is_null() {
+            return crate::drift::DriftPatch::empty();
+        }
+        crate::drift::DriftPatch::between(&self.image, live.data())
+    }
+
     pub fn set_image(&mut self, image: Value) {
         self.image = image;
     }

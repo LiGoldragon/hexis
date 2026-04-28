@@ -8,9 +8,12 @@
 //! smoke test in `tests/scaffold.rs`.
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use hexis_cli::live::Live;
+use hexis_cli::snapshot::Snapshot;
 use hexis_cli::{Error, FileId, reconciler};
 
 #[derive(Parser)]
@@ -63,32 +66,100 @@ impl Cli {
                 file,
                 declared,
                 dry_run,
-            } => {
-                let arguments = reconciler::Arguments {
-                    file_id: FileId::from_path(&file),
-                    declared_path: declared,
-                    live_path: file,
-                    snapshot_dir: state_dir().join("snapshot"),
-                    drift_dir: state_dir().join("drift"),
-                    dry_run,
-                };
-                reconciler::Reconciler::apply(&arguments)
-            }
-            Command::Diff { .. } => Err(Error::NotYetImplemented("diff")),
+            } => Self::run_apply(file, declared, dry_run),
+            Command::Diff { file } => Self::run_diff(file),
             Command::Snapshot { .. } => Err(Error::NotYetImplemented("snapshot")),
-            Command::Report => Err(Error::NotYetImplemented("report")),
+            Command::Report => Self::run_report(),
             Command::Propose => Err(Error::NotYetImplemented("propose")),
         }
     }
-}
 
-/// `~/.local/state/hexis` for normal users; `/tmp/hexis-state` as a
-/// last-resort fallback when `HOME` is unset.
-fn state_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join(".local/state/hexis"))
-        .unwrap_or_else(|| PathBuf::from("/tmp/hexis-state"))
+    fn run_apply(file: PathBuf, declared: PathBuf, dry_run: bool) -> Result<(), Error> {
+        let state = Self::state_dir();
+        let arguments = reconciler::Arguments {
+            file_id: FileId::from_path(&file),
+            declared_path: declared,
+            live_path: file,
+            snapshot_dir: state.join("snapshot"),
+            drift_dir: state.join("drift"),
+            dry_run,
+        };
+        reconciler::Reconciler::apply(&arguments)
+    }
+
+    fn run_diff(file: PathBuf) -> Result<(), Error> {
+        let file_id = FileId::from_path(&file);
+        let snapshot_path = Self::state_dir()
+            .join("snapshot")
+            .join(format!("{file_id}.json"));
+        if !snapshot_path.exists() {
+            println!("(no snapshot for {file:?} — file has not been applied yet)");
+            return Ok(());
+        }
+        let snapshot = Snapshot::from_path(&snapshot_path)?;
+        let live = Live::from_path(&file)?;
+        let drift = snapshot.drift_against(&live);
+        let rendered = serde_json::to_string_pretty(drift.as_value())
+            .expect("serde_json::Value always serializes");
+        println!("{rendered}");
+        Ok(())
+    }
+
+    fn run_report() -> Result<(), Error> {
+        let drift_dir = Self::state_dir().join("drift");
+        if !drift_dir.exists() {
+            println!("(no drift reports yet)");
+            return Ok(());
+        }
+        let mut entries: Vec<PathBuf> = fs::read_dir(&drift_dir)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|s| s.to_str()) == Some("json"))
+            .collect();
+        entries.sort();
+        if entries.is_empty() {
+            println!("(no drift reports yet)");
+            return Ok(());
+        }
+        for path in entries {
+            Self::print_report_entry(&path)?;
+        }
+        Ok(())
+    }
+
+    fn print_report_entry(path: &Path) -> Result<(), Error> {
+        let content = fs::read_to_string(path)?;
+        let document: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+            Error::DriftParse {
+                source_path: path.to_path_buf(),
+                reason: error.to_string(),
+            }
+        })?;
+        let file_id = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("<unknown>");
+        println!("=== {file_id} ===");
+        if let Some(applied_at) = document.pointer("/applied_at").and_then(|v| v.as_str()) {
+            println!("applied_at: {applied_at}");
+        }
+        if let Some(drift) = document.pointer("/drift") {
+            let rendered = serde_json::to_string_pretty(drift)
+                .expect("serde_json::Value always serializes");
+            println!("drift:\n{rendered}");
+        }
+        println!();
+        Ok(())
+    }
+
+    /// `~/.local/state/hexis` for normal users; `/tmp/hexis-state` as a
+    /// last-resort fallback when `HOME` is unset.
+    fn state_dir() -> PathBuf {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".local/state/hexis"))
+            .unwrap_or_else(|| PathBuf::from("/tmp/hexis-state"))
+    }
 }
 
 fn main() -> ExitCode {
