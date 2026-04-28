@@ -66,25 +66,28 @@ re-derivation of "did the user change this since I touched it."
 
 ## Reconciliation flow
 
-The four-step apply, expressed as actor messages on a per-target
-`Reconciler`:
+The four-step apply runs synchronously inside `State::apply` (a
+method on `reconciler::State`, which holds the `Arguments`):
 
-1. `Read(declared_path, live_path) → Loaded { declared, live, snapshot }`
-   — read three files, parse to format-preserving `Value`, fail fast
-   on any parse error.
-2. `Plan(Loaded) → Plan { actions }` — walk the union of pointers
-   reachable from declared, snapshot, and live. For each pointer,
-   determine its effective mode (nearest-ancestor lookup) and emit
-   one of: `WriteOnce`, `Ensure { user_drift }`, `Always`, or
-   `LeaveAlone`. Aggregate into a `Plan`.
-3. `Apply(Plan) → Applied { new_live, drift_patch }` — fold actions
-   into a new live image and the drift patch (RFC 7396) representing
-   the user's contribution. No I/O yet.
-4. `Commit(Applied) → Done` — atomic write of new live (`tempfile +
-   persist` on the same filesystem), atomic write of new snapshot,
-   append-only write of drift report. Fsync-on-close for both
-   state files; `flock(LOCK_EX)` on live during the
-   tempfile-rename window.
+1. **Read** — load declared (`Declared::from_path`), live
+   (`Live::from_path_or_empty`), and snapshot
+   (`Snapshot::from_path_or_empty`). Acquire `flock(LOCK_EX)` on
+   `<snapshot_dir>/<file_id>.lock` for the apply window. Fail fast on
+   any parse error.
+2. **Plan** — `Plan::build(declared, snapshot)` walks the leaves of
+   declared, looks up each leaf's effective mode via nearest-ancestor
+   on the mode map, and emits one of: `WriteOnce`, `Ensure`,
+   `Always`, or `LeaveAlone`. The result is a `Plan` (a `Vec<Action>`).
+3. **Apply** — fold the actions into a `new_live: Value` clone of
+   live's data; for `WriteOnce`, also record a marker on the snapshot.
+   Compute `drift = DriftPatch::between(snapshot.image, live.data)`
+   (skipped on first run when `snapshot.image` is `Null`). Set
+   `snapshot.image = new_live.clone()`. No I/O yet.
+4. **Commit** — atomic write of new live (`tempfile + persist` on
+   the same filesystem), atomic write of new snapshot, drift entry
+   appended to the rotating drift journal at
+   `<drift_dir>/<file_id>.json` if non-empty. The flock is released
+   on `apply` exit.
 
 A failure at step 3 leaves the system unchanged. A failure at step 4
 *after* the live rename triggers a rollback path: the old snapshot
@@ -92,8 +95,22 @@ remains valid until the new one is fsynced, and the next apply
 recomputes from the (possibly newer) live file — `once` markers are
 idempotent, `ensure` handles whatever is there.
 
-`--dry-run` short-circuits between step 3 and step 4: print the
-drift patch and the proposed new live image, write nothing.
+`--dry-run` short-circuits between step 3 and step 4: skip all
+writes and return.
+
+### v0.1 vs v2 phase observability
+
+`State::apply` collapses the four logical steps into one synchronous
+method. `State.phase` is `Idle | Committed | Failed(String)`; the
+intermediate `Loaded` / `Planned` / `Applied` states aren't exposed
+because the actor's mailbox serializes message handling — there's no
+opportunity to observe them between steps via `Message::GetPhase`.
+
+v2 will split the flow into a self-cast chain (`Run` → `Read` casts
+`Plan` → `Plan` casts `Apply` → `Apply` casts `Commit`) when the
+watcher actor and parallel-friendly file IO need cross-step
+interleaving. At that point `Phase` grows the intermediate variants
+and `GetPhase` returns where we are in the chain.
 
 ## Drift representation
 
@@ -119,11 +136,12 @@ Three reasons:
    permission-denied live file is one reconciler's problem. Other
    reconcilers must not stall behind it. With per-target actors,
    one failure means one supervised restart, not a global wedge.
-2. **Typed message protocol = legible state machine.** The four
-   reconcile steps become four message variants. The actor's state
-   field is a sum type (`Idle | Loaded | Planned | Applied`).
-   Reading the actor is reading the protocol; the type checker
-   enforces the transitions.
+2. **Typed message protocol = legible state machine.** v0.1's
+   `Message` is `Run | GetPhase`; the actor's state field is
+   `Idle | Committed | Failed(String)`. v2 splits `Run` into a
+   self-cast chain (`Read → Plan → Apply → Commit`) and grows the
+   `Phase` enum to expose intermediate states. Reading the actor is
+   reading the protocol; the type checker enforces the transitions.
 3. **Supervision tree for the proposal loop.** The Proposer
    (currently a stub; see `ARCHITECTURE-DEFERRED.md`) outlives any
    single Reconciler. Putting it under the same supervisor as the
