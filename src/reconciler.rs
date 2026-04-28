@@ -13,10 +13,11 @@
 //! `hexis apply` invocation. The actor wrapping comes into its own
 //! once the supervised, multi-target, watcher-driven flow lands in v2.
 
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use fs2::FileExt;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use serde_json::{Map, Value};
 use tempfile::NamedTempFile;
@@ -83,7 +84,18 @@ impl Reconciler {
     /// On success, writes (atomically): the new live file, the new
     /// snapshot, and (if drift was observed) the drift report. On
     /// `dry_run = true`, runs steps 1–3 and skips the writes.
+    ///
+    /// An advisory exclusive flock is held for the entire read-merge-
+    /// write window, on a sibling lock file at
+    /// `<snapshot_dir>/<file_id>.lock`. The same lock is what the v0.3
+    /// `wrapWithHexis` Nix wrapper will acquire before launching apps
+    /// (Chrome, Firefox) that own their config at runtime.
     pub fn apply(arguments: &Arguments) -> Result<(), Error> {
+        // Acquire the apply-window lock first; held until function return
+        // via the implicit drop of `_lock_file` (closing the fd releases
+        // POSIX advisory locks).
+        let _lock_file = Self::acquire_lock(arguments)?;
+
         let declared = Declared::from_path(&arguments.declared_path)?;
         let live = Live::from_path_or_empty(&arguments.live_path)?;
         let snapshot_path = arguments
@@ -147,6 +159,34 @@ impl Reconciler {
         }
 
         Ok(())
+    }
+
+    /// Acquire an advisory exclusive POSIX flock on the per-target
+    /// lock file. Returns the open `File` handle; the caller holds it
+    /// in scope and the lock releases automatically when it drops
+    /// (POSIX flock is fd-bound).
+    fn acquire_lock(arguments: &Arguments) -> Result<std::fs::File, Error> {
+        fs::create_dir_all(&arguments.snapshot_dir).map_err(|error| Error::Lock {
+            path: arguments.snapshot_dir.clone(),
+            reason: format!("create snapshot dir: {error}"),
+        })?;
+        let lock_path = arguments
+            .snapshot_dir
+            .join(format!("{}.lock", arguments.file_id));
+        let lock_file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|error| Error::Lock {
+                path: lock_path.clone(),
+                reason: format!("open: {error}"),
+            })?;
+        FileExt::lock_exclusive(&lock_file).map_err(|error| Error::Lock {
+            path: lock_path,
+            reason: format!("acquire: {error}"),
+        })?;
+        Ok(lock_file)
     }
 
     /// Write the drift report atomically. v0.1 stores latest-only —

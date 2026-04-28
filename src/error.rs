@@ -75,4 +75,7 @@ pub enum Error {
         pointer: JsonPointer,
         reason: String,
     },
+
+    #[error("could not acquire apply-window lock at {path:?}: {reason}")]
+    Lock { path: PathBuf, reason: String },
 }

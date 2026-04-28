@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
+fs2 = "0.4"
 json-patch = "4"
 ractor = { version = "0.15", features = ["async-trait"] }
 serde_json = { version = "1", features = ["preserve_order"] }
