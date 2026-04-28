@@ -85,3 +85,41 @@ fn resolve_returns_none_when_segment_is_missing() {
     let pointer = JsonPointer::from_str("/outer/missing").unwrap();
     assert!(pointer.resolve(&document).is_none());
 }
+
+#[test]
+fn root_is_ancestor_of_everything_including_itself() {
+    let root = JsonPointer::root();
+    assert!(root.is_descendant_of(&root));
+    let deep = JsonPointer::from_str("/a/b/c").unwrap();
+    assert!(deep.is_descendant_of(&root));
+}
+
+#[test]
+fn pointer_is_descendant_of_itself() {
+    let pointer = JsonPointer::from_str("/a/b").unwrap();
+    assert!(pointer.is_descendant_of(&pointer));
+}
+
+#[test]
+fn child_is_descendant_of_parent() {
+    let parent = JsonPointer::from_str("/a").unwrap();
+    let child = JsonPointer::from_str("/a/b").unwrap();
+    assert!(child.is_descendant_of(&parent));
+}
+
+#[test]
+fn prefix_overlap_is_not_descendancy() {
+    // "/aa" starts with "/a" but is not a child of "/a" — the segment
+    // boundary check (next byte = '/') is what prevents the false match.
+    let candidate = JsonPointer::from_str("/aa").unwrap();
+    let root = JsonPointer::from_str("/a").unwrap();
+    assert!(!candidate.is_descendant_of(&root));
+}
+
+#[test]
+fn unrelated_pointer_is_not_descendant() {
+    let a = JsonPointer::from_str("/foo").unwrap();
+    let b = JsonPointer::from_str("/bar").unwrap();
+    assert!(!a.is_descendant_of(&b));
+    assert!(!b.is_descendant_of(&a));
+}

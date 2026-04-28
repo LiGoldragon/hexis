@@ -90,6 +90,19 @@ impl JsonPointer {
         }
         value.pointer(&self.0)
     }
+
+    /// True iff `self` lies at-or-below `root` in the pointer tree.
+    /// The root pointer is an ancestor of everything.
+    pub fn is_descendant_of(&self, root: &JsonPointer) -> bool {
+        if root.is_root() {
+            return true;
+        }
+        let descendant_str = self.as_str();
+        let root_str = root.as_str();
+        descendant_str == root_str
+            || (descendant_str.starts_with(root_str)
+                && descendant_str.as_bytes().get(root_str.len()) == Some(&b'/'))
+    }
 }
 
 impl FromStr for JsonPointer {

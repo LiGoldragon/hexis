@@ -31,4 +31,28 @@ pub enum Error {
         source_path: PathBuf,
         reason: String,
     },
+
+    #[error("live parse failed at {source_path:?}: {reason}")]
+    LiveParse {
+        source_path: PathBuf,
+        reason: String,
+    },
+
+    #[error("live write failed at {destination_path:?}: {reason}")]
+    LiveWrite {
+        destination_path: PathBuf,
+        reason: String,
+    },
+
+    #[error("snapshot parse failed at {source_path:?}: {reason}")]
+    SnapshotParse {
+        source_path: PathBuf,
+        reason: String,
+    },
+
+    #[error("snapshot write failed at {destination_path:?}: {reason}")]
+    SnapshotWrite {
+        destination_path: PathBuf,
+        reason: String,
+    },
 }
