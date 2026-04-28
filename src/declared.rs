@@ -3,4 +3,7 @@
 //! Carries an optional `$hexis` envelope describing per-key modes. The
 //! envelope is stripped before merge.
 //!
-//! v0.1: placeholder. Implementation lands with the reconciler core.
+//! v0.1: opaque stub; the actor message types reference this name. Real
+//! parsing lands when the value layer is filled in.
+
+pub struct Declared;

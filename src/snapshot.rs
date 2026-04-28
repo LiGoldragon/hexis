@@ -5,4 +5,6 @@
 //! `always` regions). See `ARCHITECTURE.md` § "Snapshot evolution
 //! under modes" for the load-bearing detail.
 //!
-//! v0.1: placeholder.
+//! v0.1: opaque stub.
+
+pub struct Snapshot;

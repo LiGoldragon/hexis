@@ -4,15 +4,29 @@
 //! A file identifier is not a `String`; a JSON pointer is not a `String`;
 //! a mode is not a `String`. Each gets a newtype.
 
+use std::collections::hash_map::DefaultHasher;
 use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 
 /// Stable identifier for a managed file across runs.
 ///
 /// Computed as `sha256(canonical(live_path))[..12]` rendered as lowercase
-/// hex. Used as the directory key under `~/.local/state/hexis/` for the
-/// snapshot and drift report.
+/// hex. v0.1 substitutes the std `DefaultHasher` and truncates to 12 hex
+/// chars; sha256 lands with the IO layer.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct FileId(String);
+
+impl FileId {
+    /// Compute a stable id from a live-file path.
+    pub fn from_path(path: &Path) -> Self {
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        let raw = hasher.finish();
+        let hex = format!("{raw:016x}");
+        Self(hex[..12].to_string())
+    }
+}
 
 impl fmt::Display for FileId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -44,9 +58,11 @@ pub enum Mode {
     Always,
 }
 
-impl Mode {
+impl Default for Mode {
     /// The mode applied to any key whose pointer has no enclosing entry in the mode map.
-    pub const DEFAULT: Self = Self::Ensure;
+    fn default() -> Self {
+        Self::Ensure
+    }
 }
 
 impl fmt::Display for Mode {

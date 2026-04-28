@@ -1,8 +1,8 @@
-//! Smoke test — confirms the crate links and the public surface
-//! resolves. Real per-module integration tests land alongside their
-//! subsystems.
+//! Smoke tests — confirm the crate links, types render, and the actor
+//! topology spawns and tears down cleanly. Real per-module integration
+//! tests land alongside their subsystems.
 
-use hexis_cli::{Mode, Error};
+use hexis_cli::{Error, Mode, supervisor};
 
 #[test]
 fn modes_render_as_lowercase_words() {
@@ -13,12 +13,28 @@ fn modes_render_as_lowercase_words() {
 
 #[test]
 fn default_mode_is_ensure() {
-    assert_eq!(Mode::DEFAULT, Mode::Ensure);
+    assert_eq!(Mode::default(), Mode::Ensure);
 }
 
 #[test]
 fn not_yet_implemented_renders() {
     let error = Error::NotYetImplemented("apply");
-    assert!(error.to_string().contains("apply"));
-    assert!(error.to_string().contains("scaffold"));
+    let rendered = error.to_string();
+    assert!(rendered.contains("apply"));
+    assert!(rendered.contains("scaffold"));
+}
+
+#[tokio::test]
+async fn supervisor_starts_and_shuts_down_cleanly_with_no_targets() {
+    let (sup, handle) = supervisor::Supervisor::start(supervisor::Arguments {
+        reconciler_targets: vec![],
+    })
+    .await
+    .expect("supervisor should spawn with empty targets");
+
+    ractor::cast!(sup, supervisor::Message::Shutdown)
+        .expect("shutdown cast should succeed against a live supervisor");
+
+    drop(sup);
+    let _ = handle.await;
 }

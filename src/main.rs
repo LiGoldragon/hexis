@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use hexis_cli::Error;
+use hexis_cli::{Error, FileId, reconciler, supervisor};
 
 #[derive(Parser)]
 #[command(
@@ -48,9 +48,43 @@ enum Command {
 }
 
 impl Cli {
-    fn run(self) -> Result<(), Error> {
+    async fn run(self) -> Result<(), Error> {
         match self.command {
-            Command::Apply { .. } => Err(Error::NotYetImplemented("apply")),
+            Command::Apply { file, declared, dry_run: _ } => {
+                // Spin up the actor topology so the wiring is exercised
+                // even in v0.1, then surface NotYetImplemented because
+                // the four-step chain isn't wired yet.
+                let file_id = FileId::from_path(&file);
+                let snapshot_dir = std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("/tmp"))
+                    .join(".local/state/hexis/snapshot");
+                let target = reconciler::Arguments {
+                    file_id: file_id.clone(),
+                    declared_path: declared,
+                    live_path: file,
+                    snapshot_dir,
+                };
+                let (sup, handle) = supervisor::Supervisor::start(supervisor::Arguments {
+                    reconciler_targets: vec![target],
+                })
+                .await?;
+                ractor::cast!(sup, supervisor::Message::Apply { file_id }).map_err(|error| {
+                    Error::ActorCall {
+                        label: "supervisor.apply",
+                        reason: error.to_string(),
+                    }
+                })?;
+                ractor::cast!(sup, supervisor::Message::Shutdown).map_err(|error| {
+                    Error::ActorCall {
+                        label: "supervisor.shutdown",
+                        reason: error.to_string(),
+                    }
+                })?;
+                drop(sup);
+                let _ = handle.await;
+                Err(Error::NotYetImplemented("apply"))
+            }
             Command::Diff { .. } => Err(Error::NotYetImplemented("diff")),
             Command::Snapshot { .. } => Err(Error::NotYetImplemented("snapshot")),
             Command::Report => Err(Error::NotYetImplemented("report")),
@@ -59,9 +93,10 @@ impl Cli {
     }
 }
 
-fn main() -> ExitCode {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() -> ExitCode {
     let cli = Cli::parse();
-    match cli.run() {
+    match cli.run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("hexis: {error}");

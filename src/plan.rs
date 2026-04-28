@@ -5,4 +5,6 @@
 //! Each action is one of: `WriteOnce`, `Ensure { user_drift }`,
 //! `Always`, or `LeaveAlone`.
 //!
-//! v0.1: placeholder.
+//! v0.1: opaque stub.
+
+pub struct Plan;

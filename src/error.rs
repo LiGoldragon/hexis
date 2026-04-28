@@ -1,9 +1,7 @@
 //! Crate error type.
 //!
 //! One enum per crate, derived with `thiserror`. Variants carry the
-//! data needed to render a useful message. New variants are added as
-//! subsystems land — v0.1 carries only the placeholders the CLI scaffold
-//! exercises.
+//! data needed to render a useful message.
 
 use thiserror::Error;
 
@@ -14,4 +12,10 @@ pub enum Error {
 
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("actor spawn failed: {0}")]
+    ActorSpawn(String),
+
+    #[error("actor call failed ({label}): {reason}")]
+    ActorCall { label: &'static str, reason: String },
 }

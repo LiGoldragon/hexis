@@ -5,4 +5,6 @@
 //! config; symmetric with snapshot reproduction; trivially diff-able
 //! across activations.
 //!
-//! v0.1: placeholder.
+//! v0.1: opaque stub.
+
+pub struct DriftPatch;
