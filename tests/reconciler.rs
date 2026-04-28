@@ -1,7 +1,7 @@
 //! End-to-end tests for the four-step reconcile flow.
 //!
 //! Tests construct a [`reconciler::Arguments`] pointing at a tempdir,
-//! call [`Reconciler::apply`], and verify the resulting on-disk state
+//! call [`State::apply`], and verify the resulting on-disk state
 //! (live, snapshot, drift). The actor harness is exercised separately
 //! by `scaffold.rs`'s spawn/shutdown smoke test.
 
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use hexis_cli::live::Live;
-use hexis_cli::reconciler::{Arguments, Reconciler};
+use hexis_cli::reconciler::{Arguments, State};
 use hexis_cli::snapshot::Snapshot;
 use hexis_cli::types::{FileId, JsonPointer};
 use serde_json::json;
@@ -22,6 +22,10 @@ struct Fixture {
 }
 
 impl Fixture {
+    fn apply(&self) -> Result<(), hexis_cli::Error> {
+        State::new(self.arguments.clone()).apply()
+    }
+
     fn new() -> Self {
         let dir = tempdir().expect("tempdir");
         let live_path = dir.path().join("live.json");
@@ -68,7 +72,7 @@ fn apply_writes_live_and_snapshot_when_neither_exists() {
     let fixture = Fixture::new();
     fixture.write_declared(r#"{ "editor": { "tabSize": 4 } }"#);
 
-    Reconciler::apply(&fixture.arguments).expect("apply");
+    fixture.apply().expect("apply");
 
     let live = Live::from_path(&fixture.arguments.live_path).expect("live written");
     assert_eq!(live.data().pointer("/editor/tabSize"), Some(&json!(4)));
@@ -86,7 +90,7 @@ fn apply_first_run_does_not_emit_drift_report() {
     let fixture = Fixture::new();
     fixture.write_declared(r#"{ "editor": { "tabSize": 4 } }"#);
 
-    Reconciler::apply(&fixture.arguments).expect("apply");
+    fixture.apply().expect("apply");
 
     assert!(
         !fixture.drift_path().exists(),
@@ -102,7 +106,7 @@ fn apply_preserves_user_keys_declared_does_not_mention() {
     fixture.write_declared(r#"{ "editor": { "tabSize": 4 } }"#);
     fixture.write_live(r#"{ "editor": { "tabSize": 2, "lineNumbers": true } }"#);
 
-    Reconciler::apply(&fixture.arguments).expect("apply");
+    fixture.apply().expect("apply");
 
     let live = Live::from_path(&fixture.arguments.live_path).expect("read live");
     assert_eq!(live.data().pointer("/editor/tabSize"), Some(&json!(4)));
@@ -116,7 +120,7 @@ fn apply_dry_run_skips_writes() {
     let mut arguments = fixture.arguments;
     arguments.dry_run = true;
 
-    Reconciler::apply(&arguments).expect("apply dry-run");
+    State::new(arguments.clone()).apply().expect("apply dry-run");
 
     assert!(!arguments.live_path.exists(), "live not written in dry-run");
     let snapshot_path = arguments
@@ -136,7 +140,7 @@ fn once_mode_writes_marker_then_leaves_alone_on_second_pass() {
     );
 
     // First pass: writes the value, records the marker.
-    Reconciler::apply(&fixture.arguments).expect("first apply");
+    fixture.apply().expect("first apply");
     let live_after_first = Live::from_path(&fixture.arguments.live_path).expect("first live");
     assert_eq!(
         live_after_first.data().pointer("/devtools/autoConnect"),
@@ -150,7 +154,7 @@ fn once_mode_writes_marker_then_leaves_alone_on_second_pass() {
     fixture.write_live(r#"{ "devtools": { "autoConnect": false } }"#);
 
     // Second pass: marker exists → LeaveAlone. User's value survives.
-    Reconciler::apply(&fixture.arguments).expect("second apply");
+    fixture.apply().expect("second apply");
     let live_after_second = Live::from_path(&fixture.arguments.live_path).expect("second live");
     assert_eq!(
         live_after_second.data().pointer("/devtools/autoConnect"),
@@ -165,13 +169,13 @@ fn second_apply_with_drift_emits_drift_report() {
     fixture.write_declared(r#"{ "editor": { "tabSize": 4 } }"#);
 
     // First pass establishes the snapshot baseline.
-    Reconciler::apply(&fixture.arguments).expect("first apply");
+    fixture.apply().expect("first apply");
 
     // User changes a key declared doesn't override.
     fixture.write_live(r#"{ "editor": { "tabSize": 4, "wordWrap": "on" } }"#);
 
     // Second pass: drift detected, drift report written.
-    Reconciler::apply(&fixture.arguments).expect("second apply");
+    fixture.apply().expect("second apply");
 
     assert!(
         fixture.drift_path().exists(),
@@ -206,7 +210,7 @@ fn always_mode_overwrites_user_drift() {
     );
     fixture.write_live(r#"{ "security": { "sandbox": false } }"#);
 
-    Reconciler::apply(&fixture.arguments).expect("apply");
+    fixture.apply().expect("apply");
 
     let live = Live::from_path(&fixture.arguments.live_path).expect("read live");
     assert_eq!(

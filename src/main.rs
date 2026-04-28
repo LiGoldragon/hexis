@@ -75,16 +75,16 @@ impl Cli {
     }
 
     fn run_apply(file: PathBuf, declared: PathBuf, dry_run: bool) -> Result<(), Error> {
-        let state = Self::state_dir();
+        let state_dir = Self::state_dir();
         let arguments = reconciler::Arguments {
             file_id: FileId::from_path(&file),
             declared_path: declared,
             live_path: file,
-            snapshot_dir: state.join("snapshot"),
-            drift_dir: state.join("drift"),
+            snapshot_dir: state_dir.join("snapshot"),
+            drift_dir: state_dir.join("drift"),
             dry_run,
         };
-        reconciler::Reconciler::apply(&arguments)
+        reconciler::State::new(arguments).apply()
     }
 
     fn run_diff(file: PathBuf) -> Result<(), Error> {

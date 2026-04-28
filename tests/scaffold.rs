@@ -26,15 +26,14 @@ fn not_yet_implemented_renders() {
 
 #[tokio::test]
 async fn supervisor_starts_and_shuts_down_cleanly_with_no_targets() {
-    let (sup, handle) = supervisor::Supervisor::start(supervisor::Arguments {
+    let supervisor = supervisor::SupervisorHandle::start(supervisor::Arguments {
         reconciler_targets: vec![],
     })
     .await
     .expect("supervisor should spawn with empty targets");
 
-    ractor::cast!(sup, supervisor::Message::Shutdown)
-        .expect("shutdown cast should succeed against a live supervisor");
-
-    drop(sup);
-    let _ = handle.await;
+    supervisor
+        .shutdown()
+        .await
+        .expect("clean shutdown via SupervisorHandle::shutdown");
 }

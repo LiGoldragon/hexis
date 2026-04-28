@@ -2,8 +2,13 @@
 //!
 //! Owns the hexis config, spawns one `Reconciler` per managed file,
 //! spawns the (stub) `Proposer`, and routes inbound CLI commands to
-//! the appropriate child. The only place `Actor::spawn` (unrooted) is
-//! called — every other actor is `spawn_linked` from here.
+//! the appropriate child.
+//!
+//! [`Supervisor`] is a ZST — ractor's actor-identity tag, with no
+//! inherent methods (per `style.md` § "No ZST method holders"). The
+//! data-bearing handle is [`SupervisorHandle`], which owns the spawn
+//! result (an `ActorRef` plus the tokio `JoinHandle`) and exposes
+//! `start` / `actor_ref` / `shutdown`.
 
 use std::collections::HashMap;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
@@ -12,6 +17,8 @@ use crate::error::Error;
 use crate::types::FileId;
 use crate::{proposer, reconciler};
 
+/// Actor-identity tag for ractor. Carries no runtime data; the spawn
+/// result lives on [`SupervisorHandle`].
 pub struct Supervisor;
 
 pub struct State {
@@ -28,6 +35,27 @@ pub enum Message {
     ApplyAll,
     Propose,
     Shutdown,
+}
+
+impl State {
+    fn apply_target(&self, file_id: &FileId) -> Result<(), ActorProcessingErr> {
+        if let Some(reconciler_ref) = self.reconcilers.get(file_id) {
+            ractor::cast!(reconciler_ref, reconciler::Message::Run)?;
+        }
+        Ok(())
+    }
+
+    fn apply_all(&self) -> Result<(), ActorProcessingErr> {
+        for reconciler_ref in self.reconcilers.values() {
+            ractor::cast!(reconciler_ref, reconciler::Message::Run)?;
+        }
+        Ok(())
+    }
+
+    fn propose(&self) -> Result<(), ActorProcessingErr> {
+        ractor::cast!(self.proposer, proposer::Message::ProposeNow)?;
+        Ok(())
+    }
 }
 
 #[ractor::async_trait]
@@ -73,38 +101,49 @@ impl Actor for Supervisor {
         state: &mut State,
     ) -> std::result::Result<(), ActorProcessingErr> {
         match message {
-            Message::Apply { file_id } => {
-                if let Some(reconciler_ref) = state.reconcilers.get(&file_id) {
-                    ractor::cast!(reconciler_ref, reconciler::Message::Run)?;
-                }
-            }
-            Message::ApplyAll => {
-                for reconciler_ref in state.reconcilers.values() {
-                    ractor::cast!(reconciler_ref, reconciler::Message::Run)?;
-                }
-            }
-            Message::Propose => {
-                ractor::cast!(state.proposer, proposer::Message::ProposeNow)?;
-            }
-            Message::Shutdown => {
-                myself.stop(None);
-            }
+            Message::Apply { file_id } => state.apply_target(&file_id)?,
+            Message::ApplyAll => state.apply_all()?,
+            Message::Propose => state.propose()?,
+            Message::Shutdown => myself.stop(None),
         }
         Ok(())
     }
 }
 
-impl Supervisor {
+/// Owns the supervisor's spawn result — the `ActorRef` for sending
+/// messages and the `JoinHandle` for awaiting clean exit. The data-
+/// bearing partner to the `Supervisor` ZST: `start` is a real
+/// constructor returning Self.
+pub struct SupervisorHandle {
+    actor_ref: ActorRef<Message>,
+    join: tokio::task::JoinHandle<()>,
+}
+
+impl SupervisorHandle {
     /// Spawn the supervisor as the root of the hexis actor tree.
-    ///
     /// The only place a bare `Actor::spawn` is called per the ractor
-    /// convention (every other actor uses `spawn_linked` from inside
-    /// `pre_start`).
-    pub async fn start(
-        arguments: Arguments,
-    ) -> std::result::Result<(ActorRef<Message>, tokio::task::JoinHandle<()>), Error> {
-        Actor::spawn(Some("supervisor".to_string()), Supervisor, arguments)
+    /// convention — every other actor uses `spawn_linked` from inside
+    /// `pre_start`.
+    pub async fn start(arguments: Arguments) -> Result<Self, Error> {
+        let (actor_ref, join) =
+            Actor::spawn(Some("supervisor".to_string()), Supervisor, arguments)
+                .await
+                .map_err(|error| Error::ActorSpawn(error.to_string()))?;
+        Ok(Self { actor_ref, join })
+    }
+
+    pub fn actor_ref(&self) -> &ActorRef<Message> {
+        &self.actor_ref
+    }
+
+    /// Send `Shutdown` and await clean exit.
+    pub async fn shutdown(self) -> Result<(), Error> {
+        ractor::cast!(self.actor_ref, Message::Shutdown).map_err(|error| Error::ActorCall {
+            label: "supervisor.shutdown",
+            reason: error.to_string(),
+        })?;
+        self.join
             .await
-            .map_err(|error| Error::ActorSpawn(error.to_string()))
+            .map_err(|error| Error::ActorSpawn(format!("join: {error}")))
     }
 }
