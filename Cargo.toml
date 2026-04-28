@@ -1,0 +1,15 @@
+[package]
+name = "hexis-cli"
+version = "0.1.0"
+edition = "2024"
+description = "Managed-mutable config reconciliation with per-key modes"
+license-file = "LICENSE.md"
+repository = "https://github.com/LiGoldragon/hexis"
+
+[[bin]]
+name = "hexis"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
