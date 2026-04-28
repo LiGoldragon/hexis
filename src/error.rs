@@ -3,6 +3,7 @@
 //! One enum per crate, derived with `thiserror`. Variants carry the
 //! data needed to render a useful message.
 
+use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -17,5 +18,17 @@ pub enum Error {
     ActorSpawn(String),
 
     #[error("actor call failed ({label}): {reason}")]
-    ActorCall { label: &'static str, reason: String },
+    ActorCall {
+        label: &'static str,
+        reason: String,
+    },
+
+    #[error("invalid JSON pointer {0:?}: must be empty or start with '/'")]
+    InvalidJsonPointer(String),
+
+    #[error("declared parse failed at {source_path:?}: {reason}")]
+    DeclaredParse {
+        source_path: PathBuf,
+        reason: String,
+    },
 }
