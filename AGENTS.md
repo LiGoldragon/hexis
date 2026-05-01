@@ -37,6 +37,6 @@ Crate name on crates.io: `hexis-cli`. Binary name: `hexis`. The bare
   `#[cfg(test)] mod tests` blocks.
 - `nix flake check` is the canonical pre-commit test runner.
 
-See [`tools-documentation/rust/style.md`](https://github.com/LiGoldragon/tools-documentation/blob/main/rust/style.md)
-and [`tools-documentation/rust/nix-packaging.md`](https://github.com/LiGoldragon/tools-documentation/blob/main/rust/nix-packaging.md)
+See [`lore/rust/style.md`](https://github.com/LiGoldragon/lore/blob/main/rust/style.md)
+and [`lore/rust/nix-packaging.md`](https://github.com/LiGoldragon/lore/blob/main/rust/nix-packaging.md)
 for the full conventions.
