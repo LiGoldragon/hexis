@@ -123,10 +123,11 @@ drift over time.
 JSON Patch (RFC 6902) is more expressive (`move`, `copy`, `test`)
 but verbose for the audit-by-eye case the proposal loop needs.
 
-For TOML/YAML inputs (v2/v3 — see `ARCHITECTURE-DEFERRED.md`), the
-reconciler operates on the JSON-equivalent value tree internally;
-drift reports normalize to JSON Merge Patch regardless of source
-format.
+For TOML live files, the reconciler operates on the JSON-equivalent
+value tree internally and writes TOML back to `.toml` paths. Drift
+reports normalize to JSON Merge Patch regardless of source format.
+Comment and ordering preservation remain deferred adapter work. YAML
+inputs are deferred; see `ARCHITECTURE-DEFERRED.md`.
 
 ## Actor topology — why ractor
 

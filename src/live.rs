@@ -2,7 +2,7 @@
 //! right now. Owned by the application; hexis reads, plans, then
 //! atomically rewrites under `flock(LOCK_EX)`.
 //!
-//! v0.1 covers JSON only. v2 adds TOML; v3 adds YAML.
+//! v0.1 covers JSON and TOML live files. v3 adds YAML.
 //!
 //! The flock half of the read-merge-write contract lives in the
 //! reconciler — Live exposes only the read/write primitives.
@@ -18,7 +18,66 @@ use crate::error::Error;
 
 pub struct Live {
     data: Value,
+    format: LiveFormat,
     source_path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LiveFormat {
+    Json,
+    Toml,
+}
+
+impl LiveFormat {
+    fn from_path(path: &Path) -> Self {
+        match path.extension().and_then(|extension| extension.to_str()) {
+            Some("toml") => Self::Toml,
+            _ => Self::Json,
+        }
+    }
+
+    fn parse(self, text: &str, source_path: &Path) -> Result<Value, Error> {
+        match self {
+            Self::Json => serde_json::from_str(text).map_err(|error| Error::LiveParse {
+                source_path: source_path.to_path_buf(),
+                reason: error.to_string(),
+            }),
+            Self::Toml => {
+                let value: toml::Value =
+                    toml::from_str(text).map_err(|error| Error::LiveParse {
+                        source_path: source_path.to_path_buf(),
+                        reason: error.to_string(),
+                    })?;
+                serde_json::to_value(value).map_err(|error| Error::LiveParse {
+                    source_path: source_path.to_path_buf(),
+                    reason: format!("convert TOML to JSON value tree: {error}"),
+                })
+            }
+        }
+    }
+
+    fn write(self, writer: &mut impl Write, data: &Value, path: &Path) -> Result<(), Error> {
+        match self {
+            Self::Json => {
+                serde_json::to_writer_pretty(writer, data).map_err(|error| Error::LiveWrite {
+                    destination_path: path.to_path_buf(),
+                    reason: format!("serialize JSON: {error}"),
+                })
+            }
+            Self::Toml => {
+                let rendered = toml::to_string_pretty(data).map_err(|error| Error::LiveWrite {
+                    destination_path: path.to_path_buf(),
+                    reason: format!("serialize TOML: {error}"),
+                })?;
+                writer
+                    .write_all(rendered.as_bytes())
+                    .map_err(|error| Error::LiveWrite {
+                        destination_path: path.to_path_buf(),
+                        reason: format!("write TOML: {error}"),
+                    })
+            }
+        }
+    }
 }
 
 impl Live {
@@ -45,17 +104,20 @@ impl Live {
     pub fn empty(source_path: PathBuf) -> Self {
         Self {
             data: Value::Object(serde_json::Map::new()),
+            format: LiveFormat::from_path(&source_path),
             source_path,
         }
     }
 
-    /// Parse from a JSON string with a known source path.
+    /// Parse from a format inferred from the known source path.
     fn from_text(text: &str, source_path: PathBuf) -> Result<Self, Error> {
-        let data: Value = serde_json::from_str(text).map_err(|error| Error::LiveParse {
-            source_path: source_path.clone(),
-            reason: error.to_string(),
-        })?;
-        Ok(Self { data, source_path })
+        let format = LiveFormat::from_path(&source_path);
+        let data = format.parse(text, &source_path)?;
+        Ok(Self {
+            data,
+            format,
+            source_path,
+        })
     }
 
     pub fn data(&self) -> &Value {
@@ -88,12 +150,12 @@ impl Live {
             destination_path: path.to_path_buf(),
             reason: format!("create tempfile: {error}"),
         })?;
-        serde_json::to_writer_pretty(&mut tempfile, &self.data).map_err(|error| {
-            Error::LiveWrite {
-                destination_path: path.to_path_buf(),
-                reason: format!("serialize: {error}"),
-            }
-        })?;
+        let format = if path == self.source_path {
+            self.format
+        } else {
+            LiveFormat::from_path(path)
+        };
+        format.write(&mut tempfile, &self.data, path)?;
         writeln!(tempfile).map_err(|error| Error::LiveWrite {
             destination_path: path.to_path_buf(),
             reason: format!("write trailing newline: {error}"),
@@ -109,5 +171,12 @@ impl Live {
     #[doc(hidden)]
     pub fn from_text_for_test(text: &str) -> Result<Self, Error> {
         Self::from_text(text, PathBuf::from("<test>"))
+    }
+
+    /// Construct directly from a text fixture and source path. Used in
+    /// tests that need extension-based format selection.
+    #[doc(hidden)]
+    pub fn from_text_for_test_at_path(text: &str, source_path: PathBuf) -> Result<Self, Error> {
+        Self::from_text(text, source_path)
     }
 }

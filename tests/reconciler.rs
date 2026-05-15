@@ -27,8 +27,12 @@ impl Fixture {
     }
 
     fn new() -> Self {
+        Self::new_with_live_name("live.json")
+    }
+
+    fn new_with_live_name(live_name: &str) -> Self {
         let dir = tempdir().expect("tempdir");
-        let live_path = dir.path().join("live.json");
+        let live_path = dir.path().join(live_name);
         let declared_path = dir.path().join("declared.json");
         let snapshot_dir = dir.path().join("snapshot");
         let drift_dir = dir.path().join("drift");
@@ -110,7 +114,10 @@ fn apply_preserves_user_keys_declared_does_not_mention() {
 
     let live = Live::from_path(&fixture.arguments.live_path).expect("read live");
     assert_eq!(live.data().pointer("/editor/tabSize"), Some(&json!(4)));
-    assert_eq!(live.data().pointer("/editor/lineNumbers"), Some(&json!(true)));
+    assert_eq!(
+        live.data().pointer("/editor/lineNumbers"),
+        Some(&json!(true))
+    );
 }
 
 #[test]
@@ -120,7 +127,9 @@ fn apply_dry_run_skips_writes() {
     let mut arguments = fixture.arguments;
     arguments.dry_run = true;
 
-    State::new(arguments.clone()).apply().expect("apply dry-run");
+    State::new(arguments.clone())
+        .apply()
+        .expect("apply dry-run");
 
     assert!(!arguments.live_path.exists(), "live not written in dry-run");
     let snapshot_path = arguments
@@ -182,7 +191,8 @@ fn second_apply_with_drift_emits_drift_report() {
         "drift report exists after second apply"
     );
     let drift_text = fs::read_to_string(fixture.drift_path()).expect("read drift");
-    let journal: serde_json::Value = serde_json::from_str(&drift_text).expect("parse drift journal");
+    let journal: serde_json::Value =
+        serde_json::from_str(&drift_text).expect("parse drift journal");
     assert_eq!(
         journal.pointer("/schema"),
         Some(&json!(1)),
@@ -217,5 +227,38 @@ fn always_mode_overwrites_user_drift() {
         live.data().pointer("/security/sandbox"),
         Some(&json!(true)),
         "always-mode overrides user value",
+    );
+}
+
+#[test]
+fn apply_updates_toml_live_file() {
+    let fixture = Fixture::new_with_live_name("config.toml");
+    fixture.write_declared(
+        r#"{
+            "$hexis": { "schema": 1, "modes": { "/build/jobs": "always" } },
+            "build": { "jobs": 2 }
+        }"#,
+    );
+    fixture.write_live(
+        r#"
+        [build]
+        jobs = 8
+
+        [term]
+        verbose = true
+        "#,
+    );
+
+    fixture.apply().expect("apply");
+
+    let live = Live::from_path(&fixture.arguments.live_path).expect("read live");
+    assert_eq!(live.data().pointer("/build/jobs"), Some(&json!(2)));
+    assert_eq!(live.data().pointer("/term/verbose"), Some(&json!(true)));
+
+    let live_text = fs::read_to_string(&fixture.arguments.live_path).expect("read text");
+    assert!(live_text.contains("[build]"), "TOML table survives");
+    assert!(
+        live_text.contains("jobs = 2"),
+        "always-mode rewrites Cargo jobs cap"
     );
 }

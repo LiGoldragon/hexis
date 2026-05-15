@@ -29,8 +29,8 @@ the consuming repo. See
 
 **v0.1 — core reconciler operational.** `hexis apply` does the
 four-step `Read → Plan → Apply → Commit` chain end-to-end against
-local JSON config files: declared/snapshot/live load, plan dispatch
-via per-key mode, atomic write of new live + snapshot + drift via
+local JSON and TOML config files: declared/snapshot/live load, plan
+dispatch via per-key mode, atomic write of new live + snapshot + drift via
 `tempfile`, advisory `flock(LOCK_EX)` over the apply window. Tracked
 in `bd CriomOS-bb5`. The `diff` / `snapshot` / `report` / `propose`
 subcommands are reserved (return `NotYetImplemented`); the proposal

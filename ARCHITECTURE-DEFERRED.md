@@ -134,7 +134,8 @@ Optional — the v1 model is "Reconciler runs once on `apply`, exits."
 
 | Phase | Formats | Notes |
 |---|---|---|
-| **v2** | TOML | `taplo`-backed for comment + ordering preservation. `~/.gitconfig`, `cargo` config, hexis's own config. |
+| **v0.1** | JSON, TOML | TOML currently round-trips through a value tree and rewrites the file; adequate for Cargo config and other generated/simple TOML. |
+| **v2** | TOML preservation | `taplo`-backed for comment + ordering preservation. `~/.gitconfig`, hexis's own config, and user-edited dense TOML. |
 | **v3** | YAML | `indexmap`-backed parser. Anchors and merge keys explicitly unsupported. |
 | **deferred** | KDL, INI, mpv-style, sshd_config | Each requires a dedicated format-preserving parser. Add when a real consumer needs it. |
 
